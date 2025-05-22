@@ -17,56 +17,6 @@ class documenttag:
     combined_text: str = None
     final_df: pd.DataFrame = None
 
-'''
-class documenttag_segment:
-    final_df: pd.DataFrame = None
-    
-    def __init__(self,path):
-        self.path=path
-        
-
-    def text_extraction(self, state: documenttag) -> documenttag:
-        print("printing in text_extraction")
-        """
-        Extracts and summarizes text from a PDF document using OCR via Gemini.
-
-        This function:
-        - Converts a PDF file into individual images (one per page).
-        - Extracts structured text from each image using Gemini OCR.
-        - Combines and formats the extracted information into a summary.
-
-        Args:
-            path (str): File path to the input PDF document.
-
-        Returns:
-            str: A formatted summary containing the document name and extracted content.
-
-        Raises:
-            FileNotFoundError: If the PDF file does not exist.
-            Exception: If there is an issue in image conversion or text extraction.
-        """
-        try:
-            if not os.path.exists(self.path):
-                raise FileNotFoundError(f"PDF file not found: {self.path}")
-            state.combined_text = extract_all_from_folder(self.path)
-#             document_name, _ = os.path.splitext(os.path.basename(self.path))
-#             image_paths = pdf_to_images(self.path)
-
-#             extracted_sections = ''
-
-#             for image_path in image_paths:
-#                 text = extract_text_from_image_with_gemini(image_path)
-#                 extracted_sections+= text.strip()
-
-#             state.combined_text = f"Name of the document: {document_name}, and it contains information: {state.combined_text}"
-            return state
-
-        except FileNotFoundError as fnf:
-            raise fnf
-        except Exception as e:
-            raise Exception(f"Error during text extraction: {type(e).__name__} - {e}")
-'''
-
 class documenttag_segment:
     final_df: pd.DataFrame = None
     
@@ -76,6 +26,17 @@ class documenttag_segment:
         self._should_cleanup = self.local_path.startswith(tempfile.gettempdir())
 
     def _prepare_local_path(self, path: str) -> str:
+        
+        """
+        Ensures the given path is local. If the path is a GCS path (gs://), downloads it locally.
+        Otherwise, verifies the local path exists.
+
+        Args:
+            path (str): Path to check or download.
+
+        Returns:
+            str: Local filesystem path.
+        """
         if path.startswith("gs://"):
             print(f"Downloading files from GCS: {path}")
             
@@ -87,6 +48,16 @@ class documenttag_segment:
             raise FileNotFoundError(f"Path not found: {path}")
 
     def _download_gcs_folder(self, gcs_uri: str) -> str:
+        
+        """
+        Downloads all files from a Google Cloud Storage folder (GCS URI) to a local temporary directory.
+
+        Args:
+            gcs_uri (str): The GCS URI of the folder, e.g., 'gs://bucket_name/folder_prefix/'.
+
+        Returns:
+            str: The path to the local temporary directory containing the downloaded files.
+        """
         bucket_name, prefix = gcs_uri[5:].split("/", 1)
         client = storage.Client()
         bucket = client.bucket(bucket_name)
@@ -113,6 +84,19 @@ class documenttag_segment:
     def text_extraction(self, state: documenttag) -> documenttag:
         print("Running text_extraction")
         
+        """
+        Extracts text content from documents located in the local path and updates the state.
+
+        This method calls `extract_all_from_folder` using the `local_path` attribute,
+        stores the combined extracted text in `state.combined_text`, and returns the updated state.
+
+        Args:
+            state (documenttag): The documenttag state object that holds processing data.
+
+        Returns:
+            documenttag: The updated state with `combined_text` containing extracted text.
+        """
+        
         logging.info("Running text_extraction")
         try:
             # Your existing logic that takes a local folder path
@@ -130,7 +114,13 @@ class documenttag_segment:
             raise Exception(f"Error during text extraction: {type(e).__name__} - {e}")
     
     def cleanup(self):
-        """Clean up temp folder if created."""
+        
+        """
+        Removes the temporary local folder if cleanup is required.
+
+        Checks if the cleanup flag `_should_cleanup` is set and the `local_path` exists,
+        then deletes the folder and its contents to free up resources.
+        """
         if self._should_cleanup and os.path.exists(self.local_path):
             print(f"Cleaning up temp folder: {self.local_path}")
             
@@ -138,6 +128,16 @@ class documenttag_segment:
             shutil.rmtree(self.local_path, ignore_errors=True)
             
     def get_audience(self, file_name):
+        
+        """
+        Retrieves the 'Audience' value for a given document from an Excel file.
+
+        Args:
+            file_name (str): The name of the document to search for.
+
+        Returns:
+            str: The audience value if found, else an empty string.
+        """
         
         # Path to your Excel file
         excel_path = excel_name # <-- Replace with actual path
@@ -286,6 +286,18 @@ class documenttag_segment:
     def resulting_doc_type(self, state: documenttag) -> documenttag:
         
         print("printing in resulting_doc_type")
+        
+        """
+        Processes each row in the combined_text DataFrame within the state,
+        determines the document type, and appends the results.
+        Finally, saves the aggregated results to a CSV file.
+
+        Args:
+            state (documenttag): Object containing combined_text DataFrame.
+
+        Returns:
+            documenttag: The original state (unchanged).
+        """
         
         logging.info("printing in resulting_doc_type")
         result = []

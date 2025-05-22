@@ -5,7 +5,7 @@ dataset_id = "transient"
 
 # input_folder = "a_few_files"
 
-output_table_name = "output_table"
+output_table_name = "doc_tag_output_table"
 agent_reponse_table_name = "agent_response_table"
 
 BUCKET_NAME = "output_aia-aiva-poc-dna-dev-c83dcb"

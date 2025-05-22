@@ -40,6 +40,23 @@ class GCSFileHandler:
     
     def create_folder(self, folder_name):
         
+        """
+        Creates a virtual folder in a Google Cloud Storage (GCS) bucket.
+        
+        This method creates a "folder" by uploading an empty object with a name ending in a slash (`/`),
+        which most GCS interfaces interpret as a folder structure.
+
+        Args:
+            folder_name (str): The name of the folder to create. Can include nested paths like 'parent/child'.
+
+        Returns:
+            bool: True if the folder was successfully created.
+
+        Logging:
+            - Logs the start and end of folder creation.
+            - Logs confirmation of the folder creation in the specified bucket.
+        """
+        
         logging.info("Printing in create_folder")
         
         """Creates a 'folder' in GCS by uploading an empty file with a trailing slash."""
@@ -54,6 +71,25 @@ class GCSFileHandler:
 
     
     def write_file_to_gcs(self, folder_name, file_name, content):
+        
+        """
+        Writes (or overwrites) a file in a specified Google Cloud Storage (GCS) folder.
+
+        This method uploads the provided content as a file into the designated folder within the GCS bucket.
+        It supports writing all file types as long as the content is passed as a string (e.g., text, CSV, JSON, etc.).
+
+        Args:
+            folder_name (str): The target folder (path prefix) in the GCS bucket where the file will be stored.
+            file_name (str): The name of the file to be written. Can include extensions like `.txt`, `.json`, etc.
+            content (str): The content to be written into the file. Must be a string.
+
+        Returns:
+            bool: True if the file was successfully written.
+
+        Logging:
+            - Logs when the method begins and ends.
+            - Logs confirmation of the file being written and its destination.
+        """
         
         logging.info("Printing in write_file_to_gcs")
         
@@ -70,6 +106,31 @@ class GCSFileHandler:
     
     def delete_file_from_gcs(self, folder_name, file_name):
         
+        """
+        Deletes a specified file from a Google Cloud Storage (GCS) folder.
+
+        This method checks if the file exists in the given folder within the GCS bucket.
+        If the file is found, it deletes the file (blob) from the bucket.
+        If the file does not exist, it returns an appropriate error message.
+
+        Args:
+            folder_name (str): The folder (prefix path) in the GCS bucket where the file is located.
+            file_name (str): The name of the file to delete.
+
+        Returns:
+            tuple:
+                - bool: True if deletion was successful, False otherwise.
+                - str: Message indicating success or error reason.
+
+        Logging:
+            - Logs when the method starts and ends.
+            - Returns early if file does not exist, preventing unnecessary delete attempts.
+
+        Notes:
+            - Google Cloud Storage uses a flat namespace; folder structures are part of blob names.
+            - The method relies on `self.file_exists()` to check for file existence before deletion.
+        """
+        
         logging.info("Printing in delete_file_from_gcs")
         
         """Deletes a file from a GCS folder."""
@@ -83,12 +144,41 @@ class GCSFileHandler:
         return True, f"Success: File '{file_name}' deleted from '{folder_name}/'."
 
     def file_exists(self, folder_name, file_name):
-        """Checks if a file exists in a GCS folder."""
+        
+        """
+        Checks if a specific file exists within a folder in the Google Cloud Storage (GCS) bucket.
+
+        Args:
+            folder_name (str): The folder (prefix path) in the GCS bucket to check.
+            file_name (str): The name of the file to check for existence.
+
+        Returns:
+            bool: True if the file exists in the specified folder, False otherwise.
+
+        Notes:
+            - Uses the `blob.exists()` method to check for the presence of the file.
+            - GCS uses a flat namespace; folder structures are simulated via blob name prefixes.
+        """
+        
         blob = self.bucket.blob(f"{folder_name}/{file_name}")
         return blob.exists()
 
     def upload_file_to_gcs(self, folder_name, local_file_path, destination_file_name):
-        """Uploads a local file to a GCS folder and returns the full GCS path."""
+        
+        """
+        Uploads a local file to a specified folder within a Google Cloud Storage (GCS) bucket.
+
+        Args:
+            folder_name (str): The target folder (prefix) in the GCS bucket where the file will be uploaded.
+            local_file_path (str): The full path of the local file to upload.
+            destination_file_name (str): The filename to use for the uploaded file in GCS.
+
+        Returns:
+            tuple:
+                - bool: True if upload succeeded, False if an error occurred.
+                - str: The full GCS path of the uploaded file if successful,
+                       otherwise an error message describing the failure.
+        """
         try:
             blob = self.bucket.blob(f"{folder_name}/{destination_file_name}")
             blob.upload_from_filename(local_file_path)
@@ -101,7 +191,20 @@ class GCSFileHandler:
             return False, f"Error uploading file: {str(e)}"
     
     def read_json_file_from_gcs(self, folder_name, file_name):
-        """Reads and parses a JSON file from a GCS folder."""
+        
+        """
+        Reads a JSON file from a specified folder in Google Cloud Storage (GCS) and parses its content.
+
+        Args:
+            folder_name (str): The GCS folder (prefix) containing the JSON file.
+            file_name (str): The name of the JSON file to read.
+
+        Returns:
+            tuple:
+                - bool: True if the file was successfully read and parsed; False otherwise.
+                - dict or str: Parsed JSON content as a Python dictionary if successful;
+                               otherwise, an error message describing the failure.
+        """
         success, file_data = self.read_file_from_gcs(folder_name, file_name)
         if not success:
             return False, f"Error: Unable to read file '{file_name}' in '{folder_name}/'."
@@ -113,7 +216,21 @@ class GCSFileHandler:
             return False, f"Error: Invalid JSON format in '{file_name}'."
     
     def list_documents_in_gcs(self, folder_name):
-        """Reads list document name from a GCS folder."""
+        
+        """
+        Lists all document (file) names within a specified folder in a Google Cloud Storage (GCS) bucket.
+
+        Args:
+            folder_name (str): The folder (prefix) path inside the GCS bucket to list documents from.
+
+        Returns:
+            list of str: A list of document names (file names) found inside the specified folder.
+                         The folder prefix is stripped from the returned names.
+
+        Notes:
+            - Assumes that `self.client` is a GCS client instance and `self.bucket_name` is the GCS bucket name.
+            - Excludes the folder prefix itself from the returned list.
+        """
         # Get the bucket
         bucket = self.bucket
         folder_prefix = f"{folder_name}/"
@@ -127,7 +244,25 @@ class GCSFileHandler:
         return documents
     
     def read_file_from_gcs(self, folder_name, file_name):
-        """Reads a file from a GCS folder and determines if it's text or binary."""
+        
+        """
+        Reads a file from a specified folder in a Google Cloud Storage (GCS) bucket and
+        attempts to determine whether the file is text or binary.
+
+        Args:
+            folder_name (str): The folder (prefix) path inside the GCS bucket.
+            file_name (str): The name of the file to read within the folder.
+
+        Returns:
+            tuple:
+                - bool: Success status (True if file exists and was read, False otherwise).
+                - dict or str: 
+                    If successful, returns a dictionary with keys:
+                        - "text": Decoded UTF-8 string if the file is text, otherwise None.
+                        - "bytes": Raw bytes content of the file.
+                    If unsuccessful, returns an error message string.
+        """
+        
         if not self.file_exists(folder_name, file_name):
             return False, f"Error: File '{file_name}' not found in '{folder_name}/'."
 
@@ -142,7 +277,23 @@ class GCSFileHandler:
             return True, {"text": None, "bytes": file_content}  # Binary file
         
     def read_txt_file_from_gcs(self, folder_name, file_name):
-        """Reads a text file from a GCS folder."""
+        
+        """
+        Reads a text file from a specified folder in a Google Cloud Storage (GCS) bucket.
+
+        This method uses `read_file_from_gcs` to fetch the file content and verifies
+        that the file is valid UTF-8 text. If the file is binary or cannot be decoded
+        as text, an error message is returned.
+
+        Args:
+            folder_name (str): The folder (prefix) path inside the GCS bucket.
+            file_name (str): The name of the text file to read.
+
+        Returns:
+            str: 
+                - The UTF-8 decoded text content if the file is valid.
+                - An error message string if the file cannot be read or is not valid text.
+        """
         success, file_data = self.read_file_from_gcs(folder_name, file_name)
         if not success:
             return f"Error: Unable to read file '{file_name}' in '{folder_name}/'."
@@ -155,6 +306,30 @@ class GCSFileHandler:
         return file_data["text"]
     
     def extract_table_data_from_gcs(self, folder_name, file_name):
+        
+        """
+        Extracts table data from an Excel (.xlsx) or CSV file stored in a Google Cloud Storage (GCS) folder.
+
+        For Excel files:
+            - Processes all visible sheets.
+            - Skips sheets with insufficient rows or duplicate/blank column names.
+            - Extracts the first 15 rows from each valid sheet and converts them to JSON lines format.
+            - Aggregates JSON outputs from all sheets, prefixing each with the sheet name.
+
+        For CSV files:
+            - Reads the entire CSV file.
+            - Skips the file if it contains duplicate or blank column names.
+            - Extracts the first 15 rows and converts them to JSON lines format.
+
+        Args:
+            folder_name (str): The GCS folder (prefix) containing the file.
+            file_name (str): The name of the Excel or CSV file.
+
+        Returns:
+            str: A string containing JSON lines representation of the extracted data 
+                 prefixed with sheet names for Excel files, or an error message string 
+                 if the file cannot be read or has invalid structure.
+        """
         
         logging.info("Printing in extract_table_data_from_gcs")
         
@@ -227,7 +402,18 @@ class GCSFileHandler:
     def read_docx_from_gcs(self, folder_name, file_name):
         
         logging.info("printing in read_docx_from_gcs")
-        """Reads a DOCX file from GCS and extracts its text content."""
+        
+        """
+        Reads a DOCX file stored in a Google Cloud Storage (GCS) folder and extracts its full text content.
+
+        Args:
+            folder_name (str): The GCS folder (prefix) containing the DOCX file.
+            file_name (str): The name of the DOCX file to read.
+
+        Returns:
+            str: The extracted text content of the DOCX file as a single string with paragraphs separated by newlines,
+                 or an error message if the file cannot be read or its content is unavailable.
+        """
         success, file_data = self.read_file_from_gcs(folder_name, file_name)
         if not success:
             
@@ -247,7 +433,17 @@ class GCSFileHandler:
         return content
     
     def read_xml_from_gcs(self, folder_name, file_name):
-        """Reads a XML file from GCS and extracts its text content."""
+        
+        """
+        Reads an XML file stored in a Google Cloud Storage (GCS) folder and returns its text content as a string.
+
+        Args:
+            folder_name (str): The GCS folder (prefix) containing the XML file.
+            file_name (str): The name of the XML file to read.
+
+        Returns:
+            str: The raw text content of the XML file, or an error message if the file cannot be read.
+        """
         success, file_data = self.read_file_from_gcs(folder_name, file_name)
         if not success:
             
@@ -259,7 +455,24 @@ class GCSFileHandler:
     import pandas as pd
 
     def read_pdf_from_gcs(self, folder_name, file_name, image=True):
-        """Reads a XML file from GCS and extracts its text content."""
+        
+        """
+        Reads a PDF file from a Google Cloud Storage (GCS) folder and extracts its content.
+
+        Args:
+            folder_name (str): The GCS folder containing the PDF file.
+            file_name (str): The name of the PDF file to read.
+            image (bool, optional): If False, extracts text directly from the PDF pages.
+                                    If True, converts pages to images and extracts text via OCR.
+                                    Defaults to True.
+
+        Returns:
+            str or list:
+                - If image=False: Returns the extracted text from all pages as a single string.
+                - If image=True: Returns a string containing OCR-extracted text per page.
+                - Returns an empty list on exception during image-based extraction.
+                - Returns an error message string if the file cannot be read.
+        """
         from PIL import Image
         success, file_data = self.read_file_from_gcs(folder_name, file_name)
         if not success:
@@ -300,7 +513,17 @@ class GCSFileHandler:
                 return []
     
     def read_image_from_gcs(self, folder_name, file_name):
-        """Reads a PNG/JPG/JPEG file from GCS and extracts its text content."""
+        
+        """
+        Reads an image file (PNG, JPG, JPEG) from a Google Cloud Storage (GCS) folder and extracts its text content using OCR.
+
+        Args:
+            folder_name (str): The GCS folder containing the image file.
+            file_name (str): The name of the image file to read.
+
+        Returns:
+            str: Extracted text content from the image, stripped of leading/trailing whitespace.
+        """
         success, file_data = self.read_file_from_gcs(folder_name, file_name)
  
         # Download the Image as bytes
@@ -309,7 +532,18 @@ class GCSFileHandler:
         return extracted_text.strip()  # Returns full structured ER details
     
     def encode_file_to_base64_from_gcs(self, folder_name, file_name):
-        """Encodes a file from GCS to Base64."""
+        
+        """
+        Reads a file from a GCS folder and encodes its contents to a Base64 string.
+
+        Args:
+            folder_name (str): The GCS folder where the file is stored.
+            file_name (str): The name of the file to encode.
+
+        Returns:
+            str: Base64-encoded string of the file contents if successful,
+                 otherwise an error message string.
+        """
         success, file_data = self.read_file_from_gcs(folder_name, file_name)
         if not success:
             
@@ -325,7 +559,21 @@ class GCSFileHandler:
         return base64.b64encode(file_bytes).decode("utf-8")
     
     def convert_xlsx_to_string_from_gcs(self, folder_name, file_name):
-        """Reads an Excel file from GCS and converts its contents to a string."""
+        
+        """
+        Reads an Excel (.xlsx) file from a GCS folder and converts its contents into a plain string.
+
+        Args:
+            folder_name (str): The GCS folder where the Excel file is stored.
+            file_name (str): The name of the Excel file.
+
+        Returns:
+            tuple:
+                - bool: True if reading and conversion succeed, False otherwise.
+                - str: The string representation of the Excel sheet contents if successful,
+                       otherwise an error message.
+        """
+        
         success, file_data = self.read_file_from_gcs(folder_name, file_name)
         if not success:
             return False, f"Error: Unable to read file '{file_name}' in '{folder_name}/'."
@@ -369,8 +617,22 @@ class GCSFileHandler:
             return False
 
     def extract_excel_data_from_gcs(self,user_id,  file_name, sheet_name=None):
+        
         folder_name=f'{user_id}/JIRA'
-        """Extracts table data from an Excel or CSV file stored in GCS."""
+        
+        """
+        Extracts tabular data from an Excel (.xlsx) or CSV file stored in a GCS folder specific to a user.
+
+        Args:
+            user_id (str): The user identifier, used to build the GCS folder path (user_id/JIRA).
+            file_name (str): The name of the file to read from GCS.
+            sheet_name (str, optional): The specific sheet name to extract data from in an Excel file.
+                                        Defaults to the first sheet if not provided.
+
+        Returns:
+            pd.DataFrame or str: A pandas DataFrame containing the extracted data if successful;
+                                 otherwise, an error message string describing the failure.
+        """
         success, file_data = self.read_file_from_gcs(folder_name, file_name)
         if not success:
             return f"Error: Unable to read file '{file_name}' in '{folder_name}/'."
@@ -480,13 +742,36 @@ class GCSFileHandler:
             raise Exception(f"Error extracting text from image with Gemini: {type(e).__name__} - {e}")
     
     def read_file_gcs(self, folder_name, file_name):
-        """Reads a file from GCS and returns its content as bytes."""
+        
+        """
+        Reads a file from Google Cloud Storage and returns its content as bytes.
+
+        Args:
+            folder_name (str): The GCS folder (prefix) where the file is located.
+            file_name (str): The name of the file to read.
+
+        Returns:
+            bytes: The raw content of the file.
+        """
         blob = self.bucket.blob(f"{folder_name}/{file_name}")
         # blob = self.bucket.blob(file_path)
         return blob.download_as_bytes()
     
     def pdf_to_images(self, folder_name, file_name, image_format="png"):
-        """Convert each page of a GCS PDF to an image and return image bytes."""
+        
+        """
+        Convert each page of a PDF file stored in GCS to images and return the image bytes.
+
+        Args:
+            folder_name (str): The folder in GCS containing the PDF.
+            file_name (str): The PDF file name.
+            image_format (str): The desired image format (default: "png").
+
+        Returns:
+            tuple: (image_data, total_pages)
+                - image_data (list of tuples): Each tuple contains (image_name, image_bytes).
+                - total_pages (int): Total number of pages processed.
+        """
         print("folder_name: ",folder_name)
         print("file_name: ",file_name)
         
@@ -592,6 +877,8 @@ class GCSFileHandler:
                 logging.info("\033[91mprocessing ppt and pptx\033[0m")
                 prs = Presentation(filepath)
                 combined_text = "\n".join([shape.text for slide in prs.slides for shape in slide.shapes if hasattr(shape, "text")])
+                
+                print("combined_text: ", combined_text)
                 return combined_text, total_page
 
             elif file_extension in ['.jpeg', '.jpg', '.png']:

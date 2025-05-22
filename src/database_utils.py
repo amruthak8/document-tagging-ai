@@ -45,35 +45,53 @@ def insert_initial_row(table_name: str, row: dict):
     
     print("printing in insert_initial_row")
     
-    logging.info("printing in insert_initial_row")
-    table_id = f"{project_id}.{dataset_id}.{table_name}"
+    """
+    Inserts a single row into a BigQuery table.
+
+    Args:
+        table_name (str): Name of the BigQuery table (without project and dataset).
+        row (dict): The row data to insert as a dictionary.
+
+    Returns:
+        bool: True if insert succeeded, False otherwise.
+    """
     
-    print("table_id: ", table_id)
-    print("row: ", row)
-    
-    logging.info("table_id: ", table_id)
-    logging.info("row: ", row)
-    
-    # Get the table metadata
-    table = client.get_table(table_id)
-    
-    # Extract the column names from the schema
-    columns = [field.name for field in table.schema]
-    
-    print("columns: ", columns)
-    
-    logging.info("columns: ", columns)
-    
-    errors = client.insert_rows_json(table_id, [row])
-    if errors:
-        print("Insert errors:", errors)
+    try:
         
-        logging.info("Insert errors:", errors)
-    else:
-        print(f"Inserted row for {row}")
+        logging.info("printing in insert_initial_row")
+        table_id = f"{project_id}.{dataset_id}.{table_name}"
+
+        print("table_id: ", table_id)
+        print("row: ", row)
+
+        logging.info("table_id: ", table_id)
+        logging.info("row: ", row)
+
+        # Get the table metadata
+        table = client.get_table(table_id)
+
+        # Extract the column names from the schema
+        columns = [field.name for field in table.schema]
+
+        print("columns: ", columns)
+
+        logging.info("columns: ", columns)
+
+        errors = client.insert_rows_json(table_id, [row])
+        if errors:
+            print("Insert errors:", errors)
+
+            logging.info("Insert errors:", errors)
+        else:
+            print(f"Inserted row for {row}")
+
+            logging.info(f"Inserted row for {row}")
+
+        logging.info("End of insert_initial_row")
         
-        logging.info(f"Inserted row for {row}")
-        
-    logging.info("End of insert_initial_row")
+    except Exception as e:
+        print("Unexpected Error:", e)
+        logging.exception("Unexpected Error in insert_initial_row:")
+        return False
 
 

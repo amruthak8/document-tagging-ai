@@ -60,11 +60,51 @@ class documenttag_segment():
     
     def extract_data(self,state: documenttag):
         
+        """
+        Extracts text data from all documents in the specified input folder.
+
+        This method retrieves and processes all document files located in the folder 
+        defined by `self.path`, using the `gcs.extract_all_from_folder` utility.
+
+        Args:
+            state (documenttag): The current state of the document tagging process.
+                                 (Note: This argument is required by LangGraph structure but is not used directly here.)
+
+        Returns:
+            dict: A dictionary containing a DataFrame under the key `"text_df"`, 
+                  which holds the extracted text data from the documents.
+
+        Example:
+            output = self.extract_data(state)
+            df = output["text_df"]
+        """
+        
         text_df = gcs.extract_all_from_folder(self.path)
         
         return {"text_df": text_df}
     
     def get_audience(self, file_name):
+        
+        """
+        Retrieves the target audience associated with a given document name from an Excel file.
+
+        This method reads an Excel sheet (configured via `config.excel_name`) and looks up 
+        the `Audience` value corresponding to the provided document name in the `NAME` column.
+
+        Args:
+            file_name (str): The name of the document whose audience needs to be fetched.
+
+        Returns:
+            str: The target audience if the document name exists in the Excel file; 
+                 otherwise, an empty string.
+
+        Example:
+            audience = self.get_audience("example_doc.pdf")
+            if audience:
+                print(f"Target audience: {audience}")
+            else:
+                print("Document not found.")
+        """
         
         # Path to your Excel file
         excel_path = config.excel_name # <-- Replace with actual path
@@ -85,6 +125,33 @@ class documenttag_segment():
     
     #####################BASE PRODUCT TAGGING#################
     def base_product_codes(self,content):
+        
+        """
+        Extracts valid Base Product Codes (BPCs) from the given text content using an LLM.
+
+        This method uses the Gemini model to identify and extract valid numeric Base Product Codes 
+        based on strict rules. It ensures only explicitly labeled BPCs of at least 9 digits are returned.
+
+        Args:
+            content (str): The raw textual content from which BPCs need to be extracted.
+
+        Returns:
+            list[dict]: A list containing a dictionary with:
+                - "document name": A placeholder or inferred name of the document.
+                - "base product codes": A list of valid 9+ digit BPCs as strings.
+
+            Example:
+                [
+                    {
+                        "document name": "Example_Document.pdf",
+                        "base product codes": ["106249000", "106252000"]
+                    }
+                ]
+        
+        Raises:
+            None explicitly. Returns a default response if model fails or output is invalid.
+        """
+        
         system_prompt = """
     You are a specialized data extraction assistant. Your task is to extract only valid **Base Product Codes (BPCs)** from the given input. These are numeric codes found exclusively in the **'BPC' column** or fields explicitly labeled as **Base Product Code**, **BPC**, or **Base Product**.
 
@@ -125,29 +192,69 @@ class documenttag_segment():
     """
 
         user_prompt = f"""Input Text: {content}\n\nTask: Extract all numeric Base Product Codes (BPC) following the rules above."""
-
-        model = GenerativeModel("gemini-2.0-flash-001", system_instruction=system_prompt)
-
-        generation_config = {
-            "max_output_tokens": 1024,
-            "temperature": 0.1,
-            "top_p": 0.4,
-        }
-
-        response = model.generate_content(
-            [user_prompt],
-            generation_config=generation_config
-        )
         
+        try:
+            model = GenerativeModel("gemini-2.0-flash-001", system_instruction=system_prompt)
 
-        bpc_string = response.text.strip()
-        bpc_string = bpc_string.replace("```", "").replace("json", "").strip()
-        bpc_string= json.loads(bpc_string)
-        # print(bpc_string)
+            generation_config = {
+                "max_output_tokens": 1024,
+                "temperature": 0.1,
+                "top_p": 0.4,
+            }
 
-        return bpc_string
+            response = model.generate_content(
+                [user_prompt],
+                generation_config=generation_config
+            )
+
+
+            bpc_string = response.text.strip()
+            bpc_string = bpc_string.replace("```", "").replace("json", "").strip()
+            bpc_string= json.loads(bpc_string)
+            # print(bpc_string)
+
+            return bpc_string
+        
+        except Exception as e:
+            logging.exception("Unexpected error during BPC extraction:")
     
     def Universal_product_code(self,content):
+        
+        """
+        Extracts valid Universal Product Codes (UPCs) from the provided text using an LLM.
+        
+        This method leverages the Gemini model to extract UPC or GTIN codes based on clearly defined
+        and strict criteria. It only extracts 12–14 digit numeric codes from labeled fields such as
+        "UPC", "GTIN", etc., and normalizes them by removing hyphens, spaces, and non-numeric characters.
+        
+        Args:
+            content (str): The raw input text content from which UPC or GTIN codes need to be extracted.
+        
+        Returns:
+            list[dict]: A list containing a single dictionary with:
+                - "document name": A placeholder or model-inferred name of the document.
+                - "upc codes": A list of valid 12–14 digit UPC strings extracted from the input.
+
+            Example:
+                [
+                  {
+                    "document name": "Example_Document.pdf",
+                    "upc codes": ["10094562062368", "10094562062375"]
+                  }
+                ]
+        
+        Notes:
+            - If both UPC and GTIN are found, only UPCs are retained.
+            - GTINs are considered only if no UPC is available.
+            - Extraction is strictly limited to explicitly labeled fields (e.g., "UPC Code", "GTIN").
+            - Codes in product names, descriptions, parentheses, or unlabeled fields are ignored.
+            - Codes are normalized to remove hyphens and whitespace.
+
+        Raises:
+            json.JSONDecodeError: If the model returns invalid JSON.
+            Exception: Other unexpected issues can arise from model response or formatting.
+        """
+        
         system_prompt = """
         You are a specialized data extraction assistant. Your task is to extract valid **UPC (Universal Product Codes)** from the input text using strict rules.
 
@@ -229,25 +336,29 @@ class documenttag_segment():
 
 
         user_prompt = f"""Input Text: {content}\n\nTask: Extract all valid UPC codes according to the instructions above."""
+        
+        try:
+            model = GenerativeModel("gemini-2.0-flash-001", system_instruction=system_prompt)
 
-        model = GenerativeModel("gemini-2.0-flash-001", system_instruction=system_prompt)
+            generation_config = {
+                "max_output_tokens": 1024,
+                "temperature": 0.1,
+                "top_p": 0.4,
+            }
 
-        generation_config = {
-            "max_output_tokens": 1024,
-            "temperature": 0.1,
-            "top_p": 0.4,
-        }
+            response = model.generate_content(
+                [user_prompt],
+                generation_config=generation_config
+            )
 
-        response = model.generate_content(
-            [user_prompt],
-            generation_config=generation_config
-        )
+            upc_string = response.text.strip()
+            upc_string = upc_string.replace("```", "").replace("json", "").strip()
+            upc_string= json.loads(upc_string)
 
-        upc_string = response.text.strip()
-        upc_string = upc_string.replace("```", "").replace("json", "").strip()
-        upc_string= json.loads(upc_string)
-
-        return upc_string
+            return upc_string
+        
+        except Exception as e:
+            logging.exception("Unexpected error during Universal_product_code:")
 
 
     def query_distinct_products(self, upc_codes: list) -> tuple[bigquery.table.RowIterator, list] | None:
@@ -298,8 +409,9 @@ class documenttag_segment():
                 base_product_code.append(row['base_product_cd'])
                 
             return results, base_product_code
+        
         except Exception as e:
-            
+            logging.exception("Error occurred in query_distinct_products:", e)
             return None
 
         
@@ -314,18 +426,24 @@ class documenttag_segment():
         Returns:
         - list of dict: Updated structure with BPCs replacing UPCs, and key renamed to 'bpc codes'.
         """
-        updated_data = []
+        
+        try:
+            updated_data = []
 
-        for item in data:
-            upc_codes = item.get('upc codes', [])
+            for item in data:
+                upc_codes = item.get('upc codes', [])
 
-            # Replace UPCs with BPCs based on order
-            updated_item = item.copy()
-            updated_item.pop('upc codes', None)  # Remove old key
-            updated_item['base product codes'] = bpc_list.copy()  # Add new key with BPCs
-            updated_data.append(updated_item)
+                # Replace UPCs with BPCs based on order
+                updated_item = item.copy()
+                updated_item.pop('upc codes', None)  # Remove old key
+                updated_item['base product codes'] = bpc_list.copy()  # Add new key with BPCs
+                updated_data.append(updated_item)
 
-        return updated_data
+            return updated_data
+        
+        except Exception as e:
+            logging.exception("Error occurred in replace_upc_with_bpc_in_order:", e)
+            return []
     
     def extract_base_product_code(self,data, bpc_list):
         """
@@ -338,18 +456,24 @@ class documenttag_segment():
         Returns:
         - list of dict: Updated structure with BPCs replacing UPCs, and key renamed to 'bpc codes'.
         """
-        updated_data = []
+        
+        try:
+            updated_data = []
 
-        for item in data:
-            upc_codes = item.get('upc codes', [])
+            for item in data:
+                upc_codes = item.get('upc codes', [])
 
-            # Replace UPCs with BPCs based on order
-            updated_item = item.copy()
-            updated_item.pop('upc codes', None)  # Remove old key
-            updated_item['base product codes'] = bpc_list.copy()  # Add new key with BPCs
-            updated_data.append(updated_item)
+                # Replace UPCs with BPCs based on order
+                updated_item = item.copy()
+                updated_item.pop('upc codes', None)  # Remove old key
+                updated_item['base product codes'] = bpc_list.copy()  # Add new key with BPCs
+                updated_data.append(updated_item)
 
-        return updated_data
+            return updated_data
+        
+        except Exception as e:
+            logging.exception("Error occurred in extract_base_product_code:", e)
+            return []
     
     def extract_bpc_codes(self, bcp_json):
         """
@@ -362,249 +486,322 @@ class documenttag_segment():
             pd.DataFrame: DataFrame with columns: 
                           'document name', 'base product codes'
         """
-        # Ensure input is a list
-        if not isinstance(bcp_json, list):
-            bcp_json = [bcp_json]
+        
+        try:
+            # Ensure input is a list
+            if not isinstance(bcp_json, list):
+                bcp_json = [bcp_json]
 
-        bcp_rows = []
-        for entry in bcp_json:
-            doc_name = entry.get("document name", "Unknown Document")
-            bpcs = entry.get("base product codes", [])
+            bcp_rows = []
+            for entry in bcp_json:
+                doc_name = entry.get("document name", "Unknown Document")
+                bpcs = entry.get("base product codes", [])
 
-            # Ensure base product codes is a list before joining
-            if isinstance(bpcs, list):
-                bpc_str = ", ".join(bpcs)
-            else:
-                bpc_str = str(bpcs)
+                # Ensure base product codes is a list before joining
+                if isinstance(bpcs, list):
+                    bpc_str = ", ".join(bpcs)
+                else:
+                    bpc_str = str(bpcs)
 
-            bcp_rows.append({
-                "document name": doc_name,
-                "base product codes": bpc_str
-            })
+                bcp_rows.append({
+                    "document name": doc_name,
+                    "base product codes": bpc_str
+                })
 
-        return pd.DataFrame(bcp_rows)
+            return pd.DataFrame(bcp_rows)
+        
+        except Exception as e:
+            logging.exception("Failed to extract BPC codes into DataFrame:")
+            # Return empty DataFrame with expected columns on error
+            return pd.DataFrame(columns=["document name", "base product codes"])
 
 
     def base_product_code_tag(self, state: documenttag):
+        
+        """
+        Extracts Base Product Codes (BPCs) from document content using a multi-step strategy.
+
+        The method iterates over all documents in `state.text_df` and attempts to extract Base Product Codes (BPCs) 
+        using two strategies:
+
+        1. **Direct Extraction**: Applies a strict rule-based model to extract BPCs directly from the content.
+        2. **Fallback via UPC**:
+            - Extracts UPC codes using a dedicated extraction method.
+            - Queries BigQuery to map UPCs to BPCs.
+            - Replaces UPCs with mapped BPCs in the result structure.
+
+        For each document, it builds a structured result and handles errors gracefully. 
+        The final result is saved to a CSV file and returned as a DataFrame.
+
+        Args:
+            state (documenttag): A state object containing a DataFrame `text_df` with file names and their content.
+
+        Returns:
+            dict: A dictionary with the key `"bpc_df"` containing a pandas DataFrame with:
+                - "document name"
+                - "base product codes" columns.
+        """
         # state.text_df = pd.read_csv("text_df_all.csv")
         result = []
         errors = []
+        
+        try:
 
-        for index, row in state.text_df.iterrows():
-            time.sleep(1.5)
-            file_name = row[0]  # Adjust if using column names
-            file_content = row[1]
+            for index, row in state.text_df.iterrows():
+                time.sleep(1.5)
+                file_name = row[0]  # Adjust if using column names
+                file_content = row[1]
 
-            try:
-                # Step 1: Try to extract BPC directly
-                bpc_direct = self.base_product_codes(file_content)
-                has_direct_bpc = any(
-                    entry.get('base product codes') for entry in bpc_direct
-                )
+                try:
+                    # Step 1: Try to extract BPC directly
+                    bpc_direct = self.base_product_codes(file_content)
+                    has_direct_bpc = any(
+                        entry.get('base product codes') for entry in bpc_direct
+                    )
 
-                if has_direct_bpc:
-                    dataframe = self.extract_bpc_codes(bpc_direct)
+                    if has_direct_bpc:
+                        dataframe = self.extract_bpc_codes(bpc_direct)
+                        result.append(dataframe)
+                        # # print(f"[{file_name}] Base Product Code found directly.")
+
+                        logging.info(f"[{file_name}] Base Product Code found directly.")
+                        continue  # Go to next file
+
+                    # Step 2: Extract UPCs
+                    upc_result = self.Universal_product_code(file_content)
+                    upc_codes = upc_result[0].get("upc codes") if upc_result else []
+
+                    if not upc_codes:
+                        # # print(f"[{file_name}] No valid UPCs found. Skipping.")
+
+                        logging.info(f"[{file_name}] No valid UPCs found. Skipping.")
+                        continue
+
+                    # Step 3: Query BPCs using UPCs
+                    query_result = self.query_distinct_products(upc_codes)
+                    if not query_result:
+                        # # print(f"[{file_name}] No mapping found for UPCs.")
+
+                        logging.info(f"[{file_name}] No mapping found for UPCs.")
+                        continue
+
+                    _, bpc_mapped = query_result
+                    replaced_bpc_data = self.replace_upc_with_bpc_in_order(upc_result, bpc_mapped)
+
+                    # Step 4: Extract structured BPC data
+                    dataframe = self.extract_bpc_codes(replaced_bpc_data)
                     result.append(dataframe)
-                    # # print(f"[{file_name}] Base Product Code found directly.")
-                    
-                    logging.info(f"[{file_name}] Base Product Code found directly.")
-                    continue  # Go to next file
 
-                # Step 2: Extract UPCs
-                upc_result = self.Universal_product_code(file_content)
-                upc_codes = upc_result[0].get("upc codes") if upc_result else []
+                except Exception as e:
+                    error_message = f"[{file_name}] Error: {str(e)}"
 
-                if not upc_codes:
-                    # # print(f"[{file_name}] No valid UPCs found. Skipping.")
-                    
-                    logging.info(f"[{file_name}] No valid UPCs found. Skipping.")
-                    continue
+                    traceback.print_exc()
+                    errors.append({"file_name": file_name, "error": str(e)})
 
-                # Step 3: Query BPCs using UPCs
-                query_result = self.query_distinct_products(upc_codes)
-                if not query_result:
-                    # # print(f"[{file_name}] No mapping found for UPCs.")
-                    
-                    logging.info(f"[{file_name}] No mapping found for UPCs.")
-                    continue
+            final_df = pd.concat(result, ignore_index=True)
+            #final_df.to_csv("bpc_results.csv", index=False)
 
-                _, bpc_mapped = query_result
-                replaced_bpc_data = self.replace_upc_with_bpc_in_order(upc_result, bpc_mapped)
+            # Step 5: Merge results into state
+            if result:
+                bpc_df = pd.concat(result, ignore_index=True)
+            else:
+                bpc_df = pd.DataFrame(columns=["document name", "base product codes"])
 
-                # Step 4: Extract structured BPC data
-                dataframe = self.extract_bpc_codes(replaced_bpc_data)
-                result.append(dataframe)
-                
-            except Exception as e:
-                error_message = f"[{file_name}] Error: {str(e)}"
-                
-                traceback.print_exc()
-                errors.append({"file_name": file_name, "error": str(e)})
+
+            return {"bpc_df": bpc_df}
         
-        final_df = pd.concat(result, ignore_index=True)
-        final_df.to_csv("bpc_results.csv", index=False)
-
-        # Step 5: Merge results into state
-        if result:
-            bpc_df = pd.concat(result, ignore_index=True)
-        else:
-            bpc_df = pd.DataFrame(columns=["document name", "base product codes"])
-
-        
-        return {"bpc_df": bpc_df}
+        except Exception as e:
+            logging.exception("Unhandled error in base_product_code_tag:", e)
+            return {"bpc_df": pd.DataFrame(columns=["document name", "base product codes"])}
 
 
     #####################INDUSTRY SEGMENT TAGGING#################
     
     def industry_segment(self, content):
-        system_prompt= """You are a foodservice industry segment and sub-segment classifier and document analyst. Your role is to analyze the input text and classify it against a structured list of foodservice industry segments and their sub-segments using consultant-level reasoning and deep contextual understanding.
+        
+        """
+        Classifies input text into structured foodservice industry segments and sub-segments using Gemini 2.0 model.
 
-    ### OBJECTIVES:
-    1. **Segment & Sub-Segment Detection**: Detect one or more relevant segments. For each matched segment, identify **all sub-segments** that are:
-       - **explicitly mentioned**, or
-       - **clearly and specifically implied** by the context.
+        The method sends the input `content` to a Gemini 2.0 model with detailed system instructions to:
+          - Detect relevant foodservice segments and all applicable sub-segments.
+          - Map sub-segments hierarchically under their parent segments.
+          - Provide quoted justifications for each match.
+          - Avoid overclassification and weak inferences.
 
-    2. **Hierarchical Mapping**: Every sub-segment must belong to a detected parent segment.
+        If no segment can be confidently detected, the method returns a default structure indicating no match, along with justification.
 
-    3. **Exhaustive Sub-Segment Retrieval**:
-       - Once a segment is matched, **evaluate all of its defined sub-segments**.
-       - Return **every applicable sub-segment** that is either directly stated or strongly inferred based on context.
-       - Do not stop at the first match—perform a full pass through all sub-segments of the segment.
+        Args:
+            content (str): The raw input text or document content to classify.
 
-    4. **Quoted Justification**:
-       - Each matched segment and sub-segment must be supported by **quoted text** from the input.
-       - Inference must be strong and context-specific, not general or vague.
+        Returns:
+            list[dict]: A JSON-style Python list containing:
+                - `"document name"`: (str) Placeholder name for the document.
+                - `"matches"`: List of dictionaries, each with:
+                    - `"segment"`: Matched industry segment or `"No industry segment detected"`.
+                    - `"sub-segment"`: List of matched sub-segments (empty if none).
+                    - `"justification"`: Quoted or explanatory text for the classification.
 
-    5. **Avoid Overreach**:
-       - Do **not return sub-segments or segments** without clear and convincing evidence.
-       - Omit matches based on ambiguous, generic, or loosely connected references.
+        Example Output:
+            [
+              {
+                "document name": "Name of Document",
+                "matches": [
+                  {
+                    "segment": "Healthcare",
+                    "sub-segment": ["Hospitals", "Other Healthcare"],
+                    "justification": "Provides meals for patients in hospitals and facilities"
+                  }
+                ]
+              }
+            ]
 
-    ### Clarification:
-    - If a segment is matched, the system **must review and test all its sub-segments** for relevance, not just the most obvious ones.
-    - If no clear segment can be matched, return `"No industry segment detected"` and explain why.
+        Raises:
+            json.JSONDecodeError: If model response is not valid JSON.
+            Exception: For unexpected issues in model interaction or parsing.
+        """
+        system_prompt= """You are a foodservice industry segment classifier and document analyst. Your role is to examine input text and determine its relevance to foodservice industry segments based on strict yet context-aware criteria. 
 
-    ### Segment Definitions:
-        - "Education: The education foodservice segment encompasses meal programs in K-12 schools, colleges, 
-        and universities, focusing on providing nutritious, cost-effective meals to students, faculty, and staff.
-        It plays a key role in supporting student health, academic performance, and well-being, often adhering to
-        government nutrition standards. This segment balances large-scale meal production with menu variety, cultural 
-        preferences, and budget constraints.
-            - Sub-segments: Colleges and Universities, Dining Hall ,Residence Hall ,On Campus Store, On Premise Venue (Education)"
+### Objectives:
+1. **Detect Relevance**: Determine if the input text contains direct or clearly inferred references to any defined foodservice segments.
+2. **Evaluate Contextual Fit**: Analyze operations, environments, target audiences, product attributes, or service features to align with the definitions below.
+3. **Consultant-Level Reasoning**:
+   - Identify **explicit** matches (e.g., “hospital cafeteria” → Healthcare).
+   - Infer **implicit** matches when strong context exists (e.g., “serving patients” → Healthcare; “menu variety for students” → Education).
+4. **Ensure Precision**: Only tag a segment if there is a justifiable, supported match.
+5. **Support Each Match with Quoted Justification**: All matches must include quoted supporting phrases from the input text.
 
+### Industry Segment Definitions:
+    - "Education: The education foodservice segment encompasses meal programs in K-12 schools, colleges, 
+    and universities, focusing on providing nutritious, cost-effective meals to students, faculty, and staff.
+    It plays a key role in supporting student health, academic performance, and well-being, often adhering to
+    government nutrition standards. This segment balances large-scale meal production with menu variety, cultural 
+    preferences, and budget constraints."
 
-        - "Healthcare: The healthcare foodservice segment provides nutritionally balanced meals tailored to the medical
-        and dietary needs of patients in hospitals, long-term care facilities, and rehabilitation centers. 
-        It also supports staff and visitors with cafeteria-style dining while maintaining strict hygiene, safety, 
-        and regulatory standards. This segment emphasizes therapeutic diets, patient satisfaction, and operational 
-        efficiency.
-            - Sub-segments: Hospitals, Nursing Homes, Rehabilitation Centers, Other Healthcare, Other Healthcare Facilities"
+    - "Healthcare: The healthcare foodservice segment provides nutritionally balanced meals tailored to the medical
+    and dietary needs of patients in hospitals, long-term care facilities, and rehabilitation centers. 
+    It also supports staff and visitors with cafeteria-style dining while maintaining strict hygiene, safety, 
+    and regulatory standards. This segment emphasizes therapeutic diets, patient satisfaction, and operational 
+    efficiency."
 
-        - "K-12: The foodservice segment of K–12 (kindergarten through 12th grade) is a specialized part of the 
-        food industry that focuses on providing nutritious, cost-effective meals to students in public and private 
-        elementary, middle, and high schools.
-            - Sub-segment: K-12"
+    - "K-12: The foodservice segment of K–12 (kindergarten through 12th grade) is a specialized part of the 
+    food industry that focuses on providing nutritious, cost-effective meals to students in public and private 
+    elementary, middle, and high schools."
 
-        - "Lodging: The lodging segment of foodservice includes dining operations within hotels, resorts, 
-        and other accommodations, offering a range of services from casual room service to fine dining experiences. 
-        These operations aim to enhance the guest experience through convenience, quality, and customization, 
-        often featuring diverse menus to cater to travelers' tastes and expectations. Flexibility, consistency, 
-        and service excellence are essential to meet both leisure and business traveler demands.
-            - Sub-segments: Hotels ,Motels, Bed and Breakfast, Resorts, Other Lodging"
+    - "Lodging: The lodging segment of foodservice includes dining operations within hotels, resorts, 
+    and other accommodations, offering a range of services from casual room service to fine dining experiences. 
+    These operations aim to enhance the guest experience through convenience, quality, and customization, 
+    often featuring diverse menus to cater to travelers' tastes and expectations. Flexibility, consistency, 
+    and service excellence are essential to meet both leisure and business traveler demands."
 
-        - "Other: "Other" foodservice refers to operations that don’t fall neatly into traditional categories 
-        like restaurants, schools, or healthcare. This segment includes foodservice in correctional facilities, 
-        military installations, transportation centers, and corporate offices. These settings often have specific 
-        audiences and operational constraints, requiring tailored menus, service models, and logistical planning.
-            - Sub-segments: Military, Prisons, Government Cafeterias, Other Institutional"
+    - "Other: "Other" foodservice refers to operations that don’t fall neatly into traditional categories 
+    like restaurants, schools, or healthcare. This segment includes foodservice in correctional facilities, 
+    military installations, transportation centers, and corporate offices. These settings often have specific 
+    audiences and operational constraints, requiring tailored menus, service models, and logistical planning."
 
-        - "Other Food Locations: Other foodservice segments that don’t fit into clear categories are often referred 
-        to as “nontraditional” or “miscellaneous” segments. These include operations in places like correctional 
-        facilities, military bases, transportation hubs (airports, train stations), and corporate or government offices. 
-        Though varied in nature, they all serve specific, often captive, audiences with unique service needs and 
-        logistical requirements.
-            - Sub-segments: Airport, Distributors, Cash / Carry, Meal Kit, Manufacturer / Processor"
+    - "Other Food Locations: Other foodservice segments that don’t fit into clear categories are often referred 
+    to as “nontraditional” or “miscellaneous” segments. These include operations in places like correctional 
+    facilities, military bases, transportation hubs (airports, train stations), and corporate or government offices. 
+    Though varied in nature, they all serve specific, often captive, audiences with unique service needs and 
+    logistical requirements."
 
-        - "Recreation: Recreation foodservice serves venues focused on leisure and entertainment, such as stadiums, 
-        theme parks, movie theaters, and casinos. These operations emphasize speed, convenience, and crowd-pleasing menu 
-        options while enhancing the overall guest experience. Balancing efficiency with fun, they often incorporate 
-        themed offerings and branded concepts to align with the venue's atmosphere.
-            - Sub-segments: Stadiums / Ballparks, Movie Theaters, Bowling Centers, Fitness Centers, Casino and Gaming, Museums and Art Locations, Event Space, Other Recreation"
+    - "Recreation: Recreation foodservice serves venues focused on leisure and entertainment, such as stadiums, 
+    theme parks, movie theaters, and casinos. These operations emphasize speed, convenience, and crowd-pleasing menu 
+    options while enhancing the overall guest experience. Balancing efficiency with fun, they often incorporate 
+    themed offerings and branded concepts to align with the venue's atmosphere."
 
-        - "Restaurants: The restaurant foodservice segment includes a wide range of establishments, from quick-service 
-        chains to fine dining restaurants, all focused on preparing and serving meals to customers. This segment is highly 
-        diverse and customer-driven, with a strong emphasis on menu innovation, service quality, and ambiance. 
-        It plays a major role in the foodservice industry by catering to various dining preferences and social experiences.
-            - Sub-segments: Quick Service, Fast Casual, Casual Dining, Midscale Dining, Fine Dining, Food Trucks, Other Restaurants"
+    - "Restaurants: The restaurant foodservice segment includes a wide range of establishments, from quick-service 
+    chains to fine dining restaurants, all focused on preparing and serving meals to customers. This segment is highly 
+    diverse and customer-driven, with a strong emphasis on menu innovation, service quality, and ambiance. 
+    It plays a major role in the foodservice industry by catering to various dining preferences and social experiences."
 
-        - "Retail Food: The retail foodservice segment refers to food and beverage offerings within retail environments 
-        like grocery stores, convenience stores, and big-box retailers. It includes ready-to-eat meals, deli counters, 
-        salad bars, and in-store cafés, catering to consumers looking for convenient, on-the-go dining options. 
-        This segment bridges traditional retail and foodservice, emphasizing speed, accessibility, and value.
-            -if there was restaurant-focused language like:"dine-in", "carry-out", "order", "order up", "restaurant staff", 
-            "table service", "menu", "chefs", or similar terminology typically associated with restaurant operations.It should 
-            not consider as  retail foodservice segment. 
-            
-            - Sub-segments: Grocery, Supermarkets, Bakery, C-Stores, Non Grocery Retailer, Cstore - On Premise"
+    - "Retail Food: The retail foodservice segment refers to food and beverage offerings within retail environments 
+    like grocery stores, convenience stores, and big-box retailers. It includes ready-to-eat meals, deli counters, 
+    salad bars, and in-store cafés, catering to consumers looking for convenient, on-the-go dining options. 
+    This segment bridges traditional retail and foodservice, emphasizing speed, accessibility, and value."
+
+### Output Instructions:
+- If segment(s) detected: return each matched segment with quoted text justification.
+- If **no segment** clearly applies, respond with `"No industry segment detected"` and explain why (e.g., lacks context, too vague, not foodservice-related).
 
      """
 
         user_prompt=f"""
-    Input Text: {content}
+        Input Text:{content}
+        
+        Task:"Identify and classify this content against foodservice industry segments. Match only if there is strong alignment with the definitions. 
+        Quote supporting text. If no clear match, return "No industry segment detected"."
 
-    Task: 
-    Classify this content against structured foodservice industry segments and their sub-segments. 
-    - For each matched segment, return **all applicable sub-segments**.
-    - Use **quoted supporting text** for each match.
-    - Do **not infer weakly**.
-    - If no segment applies, return `"No industry segment detected"` with explanation.
+        Output Format (in JSON):
+                    [
+                      {{
+                        "document name": "Name of Document",
+                        "matches": [
+                          {{
+                            "segment": "Name of matched segment",
+                            "justification": "Quoted supporting text from input"
+                          }},
+                          ...
+                        ]
+                      }}
+                    ]
 
-    Output Format (JSON):
-    [
-      {{
-        "document name": "Name of Document",
-        "matches": [
-          {{
-            "segment": "Matched segment name",
-            "sub-segment": ["Matched sub-segment name 1", "Matched sub-segment name 2",...],
-            "justification": "Quoted supporting text"
-          }},
-          ...
-        ]
-      }}
-    ]
-
-    If no segment is matched:
-    [
-      {{
-        "document name": "Name of Document",
-        "matches": [
-          {{
-            "segment": "No industry segment detected",
-            "sub-segment": "",
-            "justification": "Explanation for no match"
-          }}
-        ]
-      }}
-    ]
-    """
-
-        model = GenerativeModel("gemini-2.0-flash-001", system_instruction=system_prompt)
-        generation_config = {
-            "max_output_tokens": 8192,
-            "temperature": 0.1,
-            "top_p": 0.4,
-        }
+                    If no matches are found, return the same structure with an empty 'matches' array:
+                    [
+                      {{
+                        "document name": "Name of Document",
+                        "matches": [
+                        {{
+                            "segment": "No industry segment detected",
+                            "justification": "Quoted supporting text from input"
+                          }}
+                          ]
+                      }}
+                    ]
+        """
+        
+        try:
+            model = GenerativeModel("gemini-2.0-flash-001", system_instruction=system_prompt)
+            generation_config = {
+                "max_output_tokens": 8192,
+                "temperature": 0.1,
+                "top_p": 0.4,
+            }
 
 
-        response = model.generate_content(
-            [user_prompt],
-            generation_config=generation_config)
-        response = response.text
-        response = response.replace("```json", "")
-        response = response.replace("```", "")
-        response= json.loads(response)
+            response = model.generate_content(
+                [user_prompt],
+                generation_config=generation_config)
+            response = response.text
+            response = response.replace("```json", "")
+            response = response.replace("```", "")
+            response= json.loads(response)
 
-        return response
+            return response
+        
+        except json.JSONDecodeError as e:
+            logging.error(f"JSON decoding error: {str(e)}")
+            logging.debug(f"Raw response: {response_text}")
+            return [{
+                "document name": "Name of Document",
+                "matches": [{
+                    "segment": "No industry segment detected",
+                    "sub-segment": "",
+                    "justification": "Model response could not be parsed as valid JSON."
+                }]
+            }]
+    
+        except Exception as e:
+            logging.error(f"Error in industry_segment classification: {str(e)}")
+            traceback.print_exc()
+            return [{
+                "document name": "Name of Document",
+                "matches": [{
+                    "segment": "No industry segment detected",
+                    "sub-segment": "",
+                    "justification": f"Model processing failed: {str(e)}"
+                }]
+            }]
+        
     
     def extract_industry_segment(self,industry_json):
         """
@@ -617,41 +814,74 @@ class documenttag_segment():
             pd.DataFrame: DataFrame with columns: 
                           'document name', 'industry segment', 'industry sub-segment'
         """
-        industry_rows = []
-        for entry in industry_json:
-            doc_name = entry.get("document name", "Unknown Document")
-            matches = entry.get("matches", [])
+        
+        try:
+            industry_rows = []
+            for entry in industry_json:
+                doc_name = entry.get("document name", "Unknown Document")
+                matches = entry.get("matches", [])
 
-            seen_segments = set()
-            seen_subsegments = set()
-            ordered_segments = []
-            ordered_subsegments = []
+                seen_segments = set()
+                seen_subsegments = set()
+                ordered_segments = []
+                ordered_subsegments = []
 
-            for match in matches:
-                segment = match.get("segment")
-                subsegments = match.get("sub-segment", [])
-                if isinstance(subsegments, str):
-                    subsegments = [subsegments]
+                for match in matches:
+                    segment = match.get("segment")
+                    subsegments = match.get("sub-segment", [])
+                    if isinstance(subsegments, str):
+                        subsegments = [subsegments]
 
-                if segment and segment not in seen_segments:
-                    seen_segments.add(segment)
-                    ordered_segments.append(segment)
+                    if segment and segment not in seen_segments:
+                        seen_segments.add(segment)
+                        ordered_segments.append(segment)
 
-                for sub in subsegments:
-                    if sub and sub not in seen_subsegments:
-                        seen_subsegments.add(sub)
-                        ordered_subsegments.append(sub)
+                    for sub in subsegments:
+                        if sub and sub not in seen_subsegments:
+                            seen_subsegments.add(sub)
+                            ordered_subsegments.append(sub)
 
-            industry_rows.append({
-                "document name": doc_name,
-                "industry segment": ", ".join(ordered_segments),
-                "industry sub-segment": ", ".join(ordered_subsegments)
-            })
+                industry_rows.append({
+                    "document name": doc_name,
+                    "industry segment": ", ".join(ordered_segments),
+                    "industry sub-segment": ", ".join(ordered_subsegments)
+                })
 
-        return pd.DataFrame(industry_rows)
+            return pd.DataFrame(industry_rows)
+        
+        except Exception as e:
+            logging.error(f"Error in extract_industry_segment: {str(e)}")
+            traceback.print_exc()
+            raise  # Optional: re-raise to let the caller decide how to handle
     
     
     def industry_segment_tag(self, state: documenttag)-> documenttag:
+        
+        """
+        Applies industry segment tagging to a batch of documents in the given state.
+
+        For each document (row) in `state.text_df`, the method:
+          1. Extracts the file name and content.
+          2. Invokes the `industry_segment()` method to classify the content into foodservice segments/sub-segments.
+          3. Parses the classification result into a structured DataFrame.
+          4. Aggregates all results and stores them in `industry_df` for downstream use.
+
+        Any errors encountered during processing are logged and collected.
+
+        Args:
+            state (documenttag): A state object containing `text_df`, a DataFrame with documents to classify.
+                Expected columns:
+                    - Column 0: Document name or ID
+                    - Column 1: Document content (text)
+
+        Returns:
+            documenttag: Updated state dictionary with:
+                - `industry_df` (DataFrame): Columns include `document name` and `industry segment`.
+                  Saved as `industry_df.csv` locally for inspection.
+
+        Raises:
+            Logs exceptions per document but does not interrupt processing of remaining documents.
+        """
         
         result = []
         errors = []
@@ -675,16 +905,29 @@ class documenttag_segment():
                 logging.info(error_message)
                 traceback.print_exc()
                 errors.append({"file_name": file_name, "error": str(e)})
-
+        
+        
         # Set dataframe even if empty to avoid attribute errors later
         if result:
             industry_df = pd.concat(result, ignore_index=True)
         else:
             industry_df = pd.DataFrame(columns=["document name", "industry segment"])
+            
+        '''
         
         final_df = pd.concat(result, ignore_index=True)
-        final_df.to_csv("industry_df.csv", index=False)
-
+        #final_df.to_csv("industry_df.csv", index=False)
+        
+        '''
+        '''
+        # Save to CSV for inspection
+        try:
+            industry_df.to_csv("industry_df.csv", index=False)
+            logging.info("industry_df.csv saved successfully.")
+        except Exception as e:
+            logging.error(f"Failed to save industry_df.csv: {str(e)}")
+            traceback.print_exc()
+        '''
         return {"industry_df": industry_df}
 
 
@@ -711,11 +954,21 @@ class documenttag_segment():
     
     
     Document Types:
-    Litho: Lithos are short, customer-facing product resources such as sell sheets and spec sheets. These documents are typically 1–3 pages in length and are designed to provide concise product information.
+    Litho: Lithos are short, customer-facing product resources such as sell sheets and spec sheets. These documents are typically 1–3 pages in length and are designed to provide concise product information. Litho documents are short, visually structured, and customer- or client-facing marketing or product information sheets. They typically:
+    - Promote ready-to-eat or ready-to-use food products.
+    - Emphasize convenience, versatility, and ease of use.
+    - Use a concise, benefit-oriented tone with bullet points or callouts.
+    - Include product codes, packaging information, nutrition facts, and other commercial specs.
+    - Do not contain cooking instructions or ingredients for preparing a dish from scratch.
     
     Selling Guide: Selling Guides are longer customer-facing documents (usually 4+ pages) that support sales conversations by highlighting product benefits and key selling points.
     
-    Recipe: This type includes recipe books and culinary idea documents. It focuses on food preparation instructions and cooking inspiration.
+    Recipe: This type includes recipe books and culinary idea documents. It focuses on food preparation instructions and cooking inspiration. Recipe documents are instructional and focus on how to prepare a dish or food item. They typically:
+    - Include a list of ingredients and step-by-step preparation instructions.
+    - Are centered around culinary creation, food inspiration, or menu development.
+    - May be part of a recipe book, culinary concept document, or meal idea sheet.
+    - May explore food presentation, flavor pairings, and preparation techniques.
+    - Are not focused on promoting prepackaged or commercial food products.
     
     Playbook: Playbooks provide structured guidance on how to navigate specific situations or scenarios. These documents are often used internally for strategic or procedural purposes.
     
@@ -734,7 +987,7 @@ class documenttag_segment():
     Other: A catch-all category for any document type that does not clearly fall into the categories above.
     
     When analyzing a piece of text, always:
-    - Detect if the text is or is not relevant to any of the above document types.
+    - Detect if the text is or is not relevant to any one of the above document types.
     - Focus on the contextual relevance of the input content to each document type’s definition — not just the presence of specific keywords. Carefully consider the purpose, format, and audience implied by the text. 
     
     Return only the single most relevant document type.
@@ -743,33 +996,33 @@ class documenttag_segment():
  """
     
         user_prompt=f"""
-        Input Text:{combined_text}
+        Input Text: {combined_text}
     Determine if the above text contains clear references to any document types listed below. Match only if the text directly aligns with a definition. Quote supporting text if applicable. If no clear match exists, respond: "No document type detected".
     
     The audience type is {audience}.
     
-    Instruction:
-    If the audience is Internal, then the document type cannot be 'Litho'.
-
+    Instructions:
+    - If the audience is Internal, then the document type cannot be 'Litho'.
+    - Please make sure to return only one most relevant document type output.
+    
         Output Format (in JSON):
                     [
                       {{
                         "document name": "Name of Document",
-                        "matches": [
+                        "match": [
                           {{
                             "doc_type": "Name of the document type",
                             "justification": "Quoted supporting text from input"
-                          }},
-                          ...
+                          }}
                         ]
                       }}
                     ]
 
-                    If no matches are found, return the same structure with an empty 'matches' array:
+                    If no matches are found, return the same structure with an empty 'match' array:
                     [
                       {{
                         "document name": "Name of Document",
-                        "matches": [
+                        "match": [
                         {{
                             "doc_type": "Name of the document type",
                             "justification": "Quoted supporting text from input"
@@ -813,26 +1066,61 @@ class documenttag_segment():
         """
         rows = []
         for entry in json_data:
-            doc_name = entry.get("document name", "Unknown Document")
-            matches = entry.get("matches", [])
+            
+            try:
+                doc_name = entry.get("document name", "Unknown Document")
+                matches = entry.get("match", [])
 
-            seen_doc_types = set()
-            ordered_doc_types = []
+                seen_doc_types = set()
+                ordered_doc_types = []
 
-            for match in matches:
-                doc_type = match.get("doc_type")
-                if doc_type and doc_type not in seen_doc_types:
-                    seen_doc_types.add(doc_type)
-                    ordered_doc_types.append(doc_type)
+                for match in matches:
+                    doc_type = match.get("doc_type")
+                    if doc_type and doc_type not in seen_doc_types:
+                        seen_doc_types.add(doc_type)
+                        ordered_doc_types.append(doc_type)
 
-            rows.append({
-                "document name": doc_name,
-                "doc_type": ", ".join(ordered_doc_types)
-            })
+                rows.append({
+                    "document name": doc_name,
+                    "doc_type": ", ".join(ordered_doc_types)
+                })
+                
+                
+                
+            except Exception as e:
+                logging.error(f"[Index {i}] Error processing entry in extract_doc_type_data: {str(e)}")
+                traceback.print_exc()
 
         return pd.DataFrame(rows)
 
     def resulting_doc_type(self, state: documenttag) -> documenttag:
+        
+        """
+        Determines the document type for each file in the provided state.
+
+        This method processes each document in `state.text_df` by:
+          1. Retrieving the document name and content.
+          2. Inferring the audience using `get_audience(file_name)`.
+          3. Classifying the document type using `get_doc_type(content, audience)`.
+          4. Extracting structured output via `extract_doc_type_data()`.
+          5. Aggregating the results into a final DataFrame.
+
+        Successfully extracted document types are logged.
+        Any errors are logged and collected but do not halt execution.
+
+        Args:
+            state (documenttag): A state object containing `text_df` with two columns:
+                - Column 0: Document name
+                - Column 1: Document content
+
+        Returns:
+            documenttag: Updated state object with a new key:
+                - `doc_type_df` (DataFrame): Contains the document name and its classified type.
+                  The result is also saved to a CSV file named `doc_type_df.csv`.
+
+        Raises:
+            Logs exceptions per document without interrupting the iteration.
+        """
         
         result = []
         errors = []
@@ -865,7 +1153,14 @@ class documenttag_segment():
             doc_type_df = pd.DataFrame(columns=["document name", "doc_type"])
 
         # Optional: save to CSV
-        doc_type_df.to_csv("doc_type_df.csv", index=False)
+        #doc_type_df.to_csv("doc_type_df.csv", index=False)
+        
+        # Save locally
+        try:
+            doc_type_df.to_csv("doc_type_df.csv", index=False)
+        except Exception as e:
+            logging.warning(f"Failed to write doc_type_df.csv: {str(e)}")
+        
 
         # Attach to state and return
         return {"doc_type_df": doc_type_df}
@@ -878,21 +1173,49 @@ class documenttag_segment():
         Searches for known account focus terms in the extracted text and returns
         structured output as a Python dictionary (not a JSON string).
         """
-        terms = [
-            "Aramark", "Avendra", "Compass", "GFS", "Performance Foods",
-            "Premier", "Sodexo", "Sysco", "Unipro", "USF"
-        ]
+        
+        """
+        Identifies account focus terms within the provided extracted text.
 
-        found_terms = []
-        for term in terms:
-            pattern = rf'\b{re.escape(term)}\b'
-            if re.search(pattern, extracted_text, flags=re.IGNORECASE):
-                found_terms.append(term)
+        This method scans the input text for the presence of known account-specific
+        terms (e.g., distributor) using case-insensitive exact word matching.
+        Matches are collected and returned in a structured dictionary.
 
-        return {
-            "document name": document_name,
-            "matches": found_terms
-        }
+        Args:
+            document_name (str): The name of the document being analyzed.
+            extracted_text (str): The full text content extracted from the document.
+
+        Returns:
+            dict: A dictionary with the following structure:
+                {
+                    "document name": <document_name>,
+                    "matches": [<list of matched terms>]
+                }
+        """
+        
+        try:
+            terms = [
+                "Aramark", "Avendra", "Compass", "GFS", "Performance Foods",
+                "Premier", "Sodexo", "Sysco", "Unipro", "USF"
+            ]
+
+            found_terms = []
+            for term in terms:
+                pattern = rf'\b{re.escape(term)}\b'
+                if re.search(pattern, extracted_text, flags=re.IGNORECASE):
+                    found_terms.append(term)
+
+            return {
+                "document name": document_name,
+                "matches": found_terms
+            }
+        
+        except Exception as e:
+            logging.error(f"[{document_name}] Error in find_account_focus_terms: {str(e)}")
+            return {
+                "document name": document_name if isinstance(document_name, str) else "Unknown Document",
+                "matches": []
+            }
 
     def get_account_focus(self, combined_text, audience):
         
@@ -1008,36 +1331,65 @@ For each match found, return the term as the "Account Focus".
             pd.DataFrame: DataFrame with columns:
                           'document name', 'account focus'
         """
-        # Normalize input to a list if it's a single dictionary
-        if isinstance(json_data, dict):
-            json_data = [json_data]
+        
+        try:
+            
+            # Normalize input to a list if it's a single dictionary
+            if isinstance(json_data, dict):
+                json_data = [json_data]
 
-        rows = []
+            rows = []
 
-        for entry in json_data:
-            if not isinstance(entry, dict):
-                continue  # Skip invalid entries
+            for entry in json_data:
+                
+                try:
+                    if not isinstance(entry, dict):
+                        continue  # Skip invalid entries
 
-            doc_name = entry.get("document name", "Unknown Document")
-            matches = entry.get("matches", [])
+                    doc_name = entry.get("document name", "Unknown Document")
+                    matches = entry.get("matches", [])
 
-            # Remove duplicates while preserving order
-            seen = set()
-            ordered_focus_terms = []
-            for term in matches:
-                if term not in seen:
-                    seen.add(term)
-                    ordered_focus_terms.append(term)
+                    # Remove duplicates while preserving order
+                    seen = set()
+                    ordered_focus_terms = []
+                    for term in matches:
+                        if term not in seen:
+                            seen.add(term)
+                            ordered_focus_terms.append(term)
 
-            rows.append({
-                "document name": doc_name,
-                "account focus": ", ".join(ordered_focus_terms)
-            })
+                    rows.append({
+                        "document name": doc_name,
+                        "account focus": ", ".join(ordered_focus_terms)
+                    })
+                    
+                except Exception as e:
+                    logging.error(f"[Entry {idx}] Error processing entry: {str(e)}")
+                    continue  # Skip to next entry on failure
 
-        return pd.DataFrame(rows)
+            return pd.DataFrame(rows)
+        
+        except Exception as e:
+            logging.critical(f"extract_acc_type_data failed: {str(e)}")
+            return pd.DataFrame(columns=["document name", "account focus"])
 
     
     def resulting_account_focus(self, state: documenttag) -> documenttag:
+        
+        """
+        Processes each document to extract account focus terms and stores the results in a structured DataFrame.
+
+        This method iterates over rows in the state's `text_df`, identifies known account focus terms
+        from the document content, logs results or errors, and builds a final DataFrame with matched account terms.
+
+        Args:
+            state (documenttag): An object containing a `text_df` DataFrame with document names and extracted text.
+
+        Returns:
+            documenttag: A dictionary with the following key:
+                - "account_focus_df": A pandas DataFrame with columns:
+                    - "document name"
+                    - "account focus" (list of matched account terms, if any)
+        """
         
         logging.info("Running resulting_account_focus")
         
@@ -1071,14 +1423,22 @@ For each match found, return the term as the "Account Focus".
                 traceback.print_exc()
                 errors.append({"file_name": file_name, "error": str(e)})
 
-        if result:
-            account_focus_df = pd.concat(result, ignore_index=True)
-        else:
+        try:
+            if result:
+                account_focus_df = pd.concat(result, ignore_index=True)
+            else:
+                account_focus_df = pd.DataFrame(columns=["document name", "account focus"])
+            
+            '''
+            # Save to CSV
+            account_focus_df.to_csv("account_focus_df.csv", index=False)
+            '''
+            
+        except Exception as final_e:
+            logging.critical(f"Failed to compile or write final account focus DataFrame: {str(final_e)}")
+            traceback.print_exc()
             account_focus_df = pd.DataFrame(columns=["document name", "account focus"])
-
-        # Save to CSV
-        account_focus_df.to_csv("account_focus_df.csv", index=False)
-
+        
         # Attach to state and return
         return {"account_focus_df": account_focus_df}
 
@@ -1102,32 +1462,44 @@ For each match found, return the term as the "Account Focus".
 
         def classify_account_focus(row):
             
-            logging.info("Printing in classify_account_focus")
-            
-            current_focus = str(row.get("account focus", "")).strip()
-            industry = str(row.get("industry segment", "")).strip().lower()
-            doc_type = str(row.get("doc_type", "")).strip().lower()
-            doc_name = str(row.get("document name", "")).strip().lower()
+            try:
+                logging.info("Printing in classify_account_focus")
 
-            # Keep non-blank values unchanged
-            if current_focus:
-                return current_focus
+                current_focus = str(row.get("account focus", "")).strip()
+                industry = str(row.get("industry segment", "")).strip().lower()
+                doc_type = str(row.get("doc_type", "")).strip().lower()
+                doc_name = str(row.get("document name", "")).strip().lower()
 
-            # Rule 2: K12 implies Operator
-            if industry == "k12":
+                # Keep non-blank values unchanged
+                if current_focus:
+                    return current_focus
+
+                # Rule 2: K12 implies Operator
+                if industry == "k12":
+                    return "Operator"
+
+                # Rule 3: External selling document implies Distributor
+                selling_keywords = ["sell", "selling", "promotion", "deal", "offer", "rebate", "discount"]
+                if doc_type == "external" and any(keyword in doc_name for keyword in selling_keywords):
+                    return "Distributor"
+
+                # Rule 4: Default to Operator
                 return "Operator"
-
-            # Rule 3: External selling document implies Distributor
-            selling_keywords = ["sell", "selling", "promotion", "deal", "offer", "rebate", "discount"]
-            if doc_type == "external" and any(keyword in doc_name for keyword in selling_keywords):
-                return "Distributor"
-
-            # Rule 4: Default to Operator
-            return "Operator"
+            
+            except Exception as e:
+                logging.error(f"Error classifying row for document '{row.get('document name', 'Unknown')}': {e}")
+                return row.get("account focus", "") or "Operator"
 
         df["account focus"] = df.apply(classify_account_focus, axis=1)
         
         logging.info("End of classify_account_focus")
+        
+        try:
+            df["account focus"] = df.apply(classify_account_focus, axis=1)
+            logging.info("Account focus classification completed.")
+        except Exception as e:
+            logging.critical(f"Failed to apply classification logic: {e}")
+            traceback.print_exc()
         
         return df
 
@@ -1141,64 +1513,81 @@ For each match found, return the term as the "Account Focus".
         
         logging.info("Printing in post_processing")
         
-        
-        # Define expected DataFrames in state
-        sources = {
-            "industry_df": state.industry_df,
-            "bpc_df": state.bpc_df,
-            "doc_type_df": state.doc_type_df,
-            "account_focus_df": state.account_focus_df,
-        }
+        try:
+            # Define expected DataFrames in state
+            sources = {
+                "industry_df": state.industry_df,
+                "bpc_df": state.bpc_df,
+                "doc_type_df": state.doc_type_df,
+                "account_focus_df": state.account_focus_df,
+            }
 
-        # Log type and preview for each dataframe
-        for name, df in sources.items():
-            # print(f"\n{name} type:", type(df))
+            # Log type and preview for each dataframe
+            for name, df in sources.items():
+                # print(f"\n{name} type:", type(df))
+
+                logging.info(f"\n{name} type:", type(df))
+
+                if isinstance(df, pd.DataFrame):
+                    print(f"\n--- {name} HEAD ---")
+                    # print(df.head())
+
+                    logging.info(f"\n--- {name} HEAD ---")
+                else:
+                    raise TypeError(f"Error: {name} is not a DataFrame")
+
+                if "document name" not in df.columns:
+                    raise ValueError(f"Error: 'document name' column missing in {name}. Columns found: {df.columns.tolist()}")
+
+            # Merge all DataFrames sequentially on 'document name'
+            merged_df = sources["account_focus_df"]
+            for name in [ "doc_type_df","bpc_df", "industry_df"]:
+                merged_df = pd.merge(merged_df, sources[name], on="document name", how="outer")
+
+            # Fill missing columns
+            required_columns = [
+                "industry segment",
+                "industry sub-segment",
+                "base product codes",
+                "doc_type",
+                "account focus"
+            ]
+            for col in required_columns:
+                if col not in merged_df.columns:
+                    merged_df[col] = ""
+                else:
+                    merged_df[col] = merged_df[col].fillna("")
+
+
+            logging.info("\n=== post_processing completed successfully ===")
+            logging.info("Merged dataframe saved to 'merge_results.csv'")
+            logging.info("Final dataframe shape:", merged_df.shape)
+
+            merged_df=self.update_account_focus(merged_df)
             
-            logging.info(f"\n{name} type:", type(df))
+            #print("merged_df: ", merged_df.head(5))
             
-            if isinstance(df, pd.DataFrame):
-                print(f"\n--- {name} HEAD ---")
-                # print(df.head())
+            # Loop over each row and convert to dictionary
+            for index, row in df.iterrows():
                 
-                logging.info(f"\n--- {name} HEAD ---")
-            else:
-                raise TypeError(f"Error: {name} is not a DataFrame")
+                db_dict = row.to_dict()
+                
+                print("db_dict: ", db_dict)
+                
+                insert_initial_row(output_table_name, db_dict)
+                
+            # Save to CSV
+            merged_df.to_csv("merge_results.csv", index=False)
+            
 
-            if "document name" not in df.columns:
-                raise ValueError(f"Error: 'document name' column missing in {name}. Columns found: {df.columns.tolist()}")
+            logging.info("End of post_processing")
 
-        # Merge all DataFrames sequentially on 'document name'
-        merged_df = sources["account_focus_df"]
-        for name in [ "doc_type_df","bpc_df", "industry_df"]:
-            merged_df = pd.merge(merged_df, sources[name], on="document name", how="outer")
-
-        # Fill missing columns
-        required_columns = [
-            "industry segment",
-            "industry sub-segment",
-            "base product codes",
-            "doc_type",
-            "account focus"
-        ]
-        for col in required_columns:
-            if col not in merged_df.columns:
-                merged_df[col] = ""
-            else:
-                merged_df[col] = merged_df[col].fillna("")
-
+            return {"final_df": merged_df}
         
-        logging.info("\n=== post_processing completed successfully ===")
-        logging.info("Merged dataframe saved to 'merge_results.csv'")
-        logging.info("Final dataframe shape:", merged_df.shape)
-        
-        merged_df=self.update_account_focus(merged_df)
-        
-        # Save to CSV
-        merged_df.to_csv("merge_results.csv", index=False)
-        
-        
-        logging.info("End of post_processing")
-
-        return {"final_df": merged_df}
+        except Exception as e:
+            logging.error(f"Exception in post_processing: {e}")
+            traceback.print_exc()
+            # Return empty DataFrame or partial results as fallback
+            return {"final_df": pd.DataFrame()}
     
     
